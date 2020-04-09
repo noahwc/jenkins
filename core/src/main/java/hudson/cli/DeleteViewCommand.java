@@ -28,7 +28,6 @@ import hudson.Extension;
 import hudson.cli.handlers.ViewOptionHandler;
 import hudson.model.ViewGroup;
 import hudson.model.View;
-import jenkins.model.Jenkins;
 
 import org.kohsuke.args4j.Argument;
 
@@ -40,7 +39,7 @@ import java.util.List;
  * @since 1.538
  */
 @Extension
-public class DeleteViewCommand extends DeleteItemCommand {
+public class DeleteViewCommand extends CLICommand {
 
     @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
     @Argument(usage="View names to delete", required=true, multiValued=true)
@@ -53,35 +52,50 @@ public class DeleteViewCommand extends DeleteItemCommand {
     }
 
     @Override
-    protected void checkExists(Object item, String item_s, String item_type) throws Exception {
-        if (item == null) {
-            throw new IllegalArgumentException("View name is empty");
-        }
-        return;
-    }
-
-    @Override
-    protected void tryDelete(String view_s, Jenkins jenkins) throws Exception{
-        ViewOptionHandler voh = new ViewOptionHandler(null, null, null);
-        View view = voh.getView(view_s);
-
-        checkExists(view, view_s, "view");
-
-        view.checkPermission(View.DELETE);
-
-        ViewGroup group = view.getOwner();
-        if (!group.canDelete(view)) {
-            throw new IllegalStateException(String.format("%s does not allow to delete '%s' view",
-                group.getDisplayName(),
-                view.getViewName()));
-        }
-        group.deleteView(view);
-        return;
-    }
-
-    @Override
     protected int run() throws Exception {
-        deleteItems(views);
+
+        boolean errorOccurred = false;
+
+        // Remove duplicates
+        final HashSet<String> hs = new HashSet<>(views);
+
+        ViewOptionHandler voh = new ViewOptionHandler(null, null, null);
+
+        for(String view_s : hs) {
+            View view;
+
+            try {
+                view = voh.getView(view_s);
+
+                if (view == null) {
+                    throw new IllegalArgumentException("View name is empty");
+                }
+
+                view.checkPermission(View.DELETE);
+
+                ViewGroup group = view.getOwner();
+                if (!group.canDelete(view)) {
+                    throw new IllegalStateException(String.format("%s does not allow to delete '%s' view",
+                            group.getDisplayName(),
+                            view.getViewName()));
+                }
+
+                group.deleteView(view);
+            } catch (Exception e) {
+                if(hs.size() == 1) {
+                    throw e;
+                }
+
+                final String errorMsg = view_s + ": " + e.getMessage();
+                stderr.println(errorMsg);
+                errorOccurred = true;
+                continue;
+            }
+        }
+
+        if (errorOccurred) {
+            throw new AbortException(CLI_LISTPARAM_SUMMARY_ERROR_TEXT);
+        }
         return 0;
     }
 }
